@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test</title>
+</head>
+
+<body>
+    <h2>WebSocket Test</h2>
+    <div id="chat-box"></div>
+    <input type="text" id="messageInput" placeholder="Type a message" />
+    <button onclick="sendMessage()">Send</button>
+
+    <script>
+        const ws = new WebSocket("ws://localhost:8090");
+        const chatBox = document.getElementById("chat-box");
+        const input = document.getElementById("messageInput");
+
+        ws.onopen = () => {
+            appendMessage("Connected to chat!");
+        };
+        ws.onmessage = (e) => {
+            appendMessage(e.data);
+        };
+        ws.onerror = (error) => {
+            console.error("Websocket error:", error);
+        };
+        ws.onclose = () => {
+            appendMessage("Disconnected from server.")
+        };
+        function sendMessage() {
+            const msg = input.value.trim();
+            if (msg !== "") {
+                console.log("Sending message:", msg);
+                ws.send(msg);
+                input.value = "";
+            }
+        }
+        function appendMessage(msg) {
+            const p = document.createElement("p");
+            p.textContent = msg;
+            chatBox.appendChild(p)
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        input.addEventListener("keydown", e => {
+            if (e.key === "Enter") sendMessage();
+        })
+    </script>
+</body>
+
+</html>
