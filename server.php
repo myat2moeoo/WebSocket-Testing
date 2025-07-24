@@ -1,4 +1,3 @@
-
 <?php
 use Ratchet\MessageComponentInterface;
 use Ratchet\ConnectionInterface;
@@ -82,5 +81,4 @@ $server = IoServer::factory(
 );
 echo "Websocket server is running on port 9000...\n";
 $server->run();
->>>>>>> d0b0318 (Add/update client.html and server.php)
 ?>
