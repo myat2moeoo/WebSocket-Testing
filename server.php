@@ -41,23 +41,36 @@ class chat implements MessageComponentInterface
     {
         echo "Received from {$from->resourceId}: $msg\n";
 
+        $data = json_decode($msg, true);
+
+        if (!$data) {
+            $messageText = $msg;
+            $imagePath = null;
+        } else {
+            $messageText = $data['message'] ?? '';
+            $imagePath = $data['image'] ?? null;
+        }
+
         try {
-            $stmt = $this->pdo->prepare("INSERT INTO chat_messages (sender_id, message) VALUES (?, ?)");
-            $stmt->execute([$from->resourceId, $msg]);
+            // Insert message and image_path into DB
+            $stmt = $this->pdo->prepare("INSERT INTO chat_messages (sender_id, message, image_path) VALUES (?, ?, ?)");
+            $stmt->execute([$from->resourceId, $messageText, $imagePath]);
         } catch (PDOException $e) {
             echo "DB Insert Error: " . $e->getMessage() . "\n";
             $from->send("Error saving message.");
-            return; 
+            return;
         }
 
         foreach ($this->clients as $client) {
-            if ($from != $client) {
-                $client->send("User {$from->resourceId}: $msg");
-            } else {
-                $client->send("You: $msg");
-            }
+            $payload = [
+                'sender' => ($from === $client) ? 'You' : "User {$from->resourceId}",
+                'message' => $messageText,
+                'image' => $imagePath,
+            ];
+            $client->send(json_encode($payload));
         }
     }
+
 
     public function onError(ConnectionInterface $conn, \Exception $e)
     {
