@@ -8,45 +8,101 @@
 </head>
 
 <body>
-    <h2>WebSocket Test</h2>
-    <div id="chat-box"></div>
+    <h2>WebSocket Chat</h2>
+    <div id="chat-box" style="border:1px solid #ccc; padding:10px; height:300px; overflow-y:auto;"></div>
     <input type="text" id="messageInput" placeholder="Type a message" />
-    <button onclick="sendMessage()">Send</button>
+    <input type="file" id="imageInput" accept="image/*">
+    <button id="sendBtn">Send</button>
 
     <script>
+        const username = "User " + Math.floor(Math.random() * 1000);
         const ws = new WebSocket("ws://localhost:9000");
         const chatBox = document.getElementById("chat-box");
         const input = document.getElementById("messageInput");
 
         ws.onopen = () => {
-            appendMessage("Connected to chat!");
+            appendMessage(`<em>Connected as ${username}</em>`);
         };
+
         ws.onmessage = (e) => {
-            appendMessage(e.data);
-        };
-        ws.onerror = (error) => {
-            console.error("Websocket error:", error);
-        };
-        ws.onclose = () => {
-            appendMessage("Disconnected from server.")
-        };
-        function sendMessage() {
-            const msg = input.value.trim();
-            if (msg !== "") {
-                console.log("Sending message:", msg);
-                ws.send(msg);
-                input.value = "";
+            let data;
+            try {
+                data = JSON.parse(e.data);
+            } catch {
+                data = { sender: '', message: e.data, image: null };
             }
+
+            let html = `<strong>${data.sender}:</strong><br>`;
+            if (data.image) {
+                html += `<img src="${data.image}" alt="Image" style="max-width: 200px; max-height: 200px;">`;
+            } else if (data.message) {
+                html += `${data.message}`;
+            }
+
+            appendMessage(html);
+        };
+
+        ws.onerror = (error) => {
+            console.error("WebSocket error:", error);
+        };
+
+        ws.onclose = () => {
+            appendMessage("<em>Disconnected from server.</em>");
+        };
+
+        async function uploadImage(file) {
+            const formData = new FormData();
+            formData.append('image', file);
+
+            const res = await fetch('upload.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await res.json();
+            if (data.url) return data.url;
+            else throw new Error(data.error || 'Upload failed');
         }
-        function appendMessage(msg) {
+
+        document.getElementById('sendBtn').addEventListener('click', async () => {
+            const msg = input.value.trim();
+            const imageFile = document.getElementById('imageInput').files[0];
+
+            let imageUrl = null;
+            if (imageFile) {
+                try {
+                    imageUrl = await uploadImage(imageFile);
+                } catch (err) {
+                    alert('Image upload error: ' + err.message);
+                    return;
+                }
+            }
+
+            const messageObj = {
+                sender: username,
+                message: msg || '',
+                image: imageUrl     
+            };
+
+            ws.send(JSON.stringify(messageObj));
+
+            input.value = '';
+            document.getElementById('imageInput').value = '';
+        });
+
+        function appendMessage(msgHTML) {
             const p = document.createElement("p");
-            p.textContent = msg;
-            chatBox.appendChild(p)
+            p.innerHTML = msgHTML;
+            chatBox.appendChild(p);
             chatBox.scrollTop = chatBox.scrollHeight;
         }
+
         input.addEventListener("keydown", e => {
-            if (e.key === "Enter") sendMessage();
-        })
+            if (e.key === "Enter") {
+                document.getElementById('sendBtn').click();
+            }
+        });
     </script>
 </body>
+
 </html>
