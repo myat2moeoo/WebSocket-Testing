@@ -16,13 +16,13 @@ class chat implements MessageComponentInterface
     {
         $this->clients = new \SplObjectStorage;
 
-        $host = 'localhost';
+        $host = '127.0.0.1';
         $dbname = "websocket_chat";
         $user = "root";
-        $pass = "root";
+        $pass = "";
 
         try {
-            $this->pdo = new PDO("mysql:host=localhost;dbname=websocket_chat;charset=utf8", $user, $pass);
+            $this->pdo = new PDO("mysql:host=127.0.0.1;port=3307;dbname=$dbname;charset=utf8", $user, $pass);
             $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             echo "Database connected.\n";
         } catch (PDOException $e) {
@@ -30,31 +30,42 @@ class chat implements MessageComponentInterface
         }
         echo "Chat server started..\n";
     }
+
     public function onOpen(ConnectionInterface $conn)
     {
         $this->clients->attach($conn);
         echo "New Connection! ({$conn->resourceId})\n";
         flush();
-        $conn->send("Welcome! You are user {$conn->resourceId}");
+        $welcome = [
+            'sender_id' => 'System',
+            'message' => "Welcome! You are user {$conn->resourceId}",
+            'file_type' => null,
+            'file_url' => null
+        ];
+        $conn->send(json_encode($welcome));
     }
+
     public function onMessage(ConnectionInterface $from, $msg)
     {
         echo "Received from {$from->resourceId}: $msg\n";
 
         $data = json_decode($msg, true);
+        $messageText = $data["message"] ?? '';
+        $fileType = $data['file_type'] ?? '';
+        $fileUrl = $data['file_url'] ?? '';
 
-        if (!$data) {
-            $messageText = $msg;
-            $imagePath = null;
-        } else {
-            $messageText = $data['message'] ?? '';
-            $imagePath = $data['image'] ?? null;
+        $imagePath = null;
+        $filePath = null;
+
+        if ($fileType == 'image') {
+            $imagePath = $fileUrl;
+        } else if ($fileType == 'pdf') {
+            $filePath = $fileUrl;
         }
 
         try {
-            // Insert message and image_path into DB
-            $stmt = $this->pdo->prepare("INSERT INTO chat_messages (sender_id, message, image_path) VALUES (?, ?, ?)");
-            $stmt->execute([$from->resourceId, $messageText, $imagePath]);
+            $stmt = $this->pdo->prepare("INSERT INTO chat_messages (sender_id, message, image_path, file_path) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$from->resourceId, $messageText, $imagePath, $filePath]);
         } catch (PDOException $e) {
             echo "DB Insert Error: " . $e->getMessage() . "\n";
             $from->send("Error saving message.");
@@ -63,14 +74,14 @@ class chat implements MessageComponentInterface
 
         foreach ($this->clients as $client) {
             $payload = [
-                'sender' => ($from === $client) ? 'You' : "User {$from->resourceId}",
+                'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}",
                 'message' => $messageText,
-                'image' => $imagePath,
+                'file_type' => $fileType,
+                'file_url' => $fileUrl
             ];
             $client->send(json_encode($payload));
         }
     }
-
 
     public function onError(ConnectionInterface $conn, \Exception $e)
     {
@@ -84,6 +95,7 @@ class chat implements MessageComponentInterface
         echo "Connection {$conn->resourceId} has disconnected\n";
     }
 }
+
 $server = IoServer::factory(
     new HttpServer(
         new WsServer(
@@ -92,6 +104,7 @@ $server = IoServer::factory(
     ),
     9000
 );
+
 echo "Websocket server is running on port 9000...\n";
 $server->run();
 ?>
