@@ -2,106 +2,129 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSocket Test</title>
+    <meta charset="UTF-8" />
+    <title>WebSocket Chat with File Upload</title>
+    <style>
+        body {
+            font-family: Arial;
+            margin: 20px;
+        }
+
+        #messages {
+            border: 1px solid #ccc;
+            height: 300px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .message img {
+            max-width: 200px;
+            display: block;
+            margin-top: 5px;
+        }
+
+        .message a {
+            display: inline-block;
+            margin-top: 5px;
+            color: blue;
+            text-decoration: underline;
+        }
+    </style>
 </head>
 
 <body>
-    <h2>WebSocket Chat</h2>
-    <div id="chat-box" style="border:1px solid #ccc; padding:10px; height:300px; overflow-y:auto;"></div>
+
+    <h2>Chat App</h2>
+    <div id="messages"></div>
+
     <input type="text" id="messageInput" placeholder="Type a message" />
-    <input type="file" id="imageInput" accept="image/*">
-    <button id="sendBtn">Send</button>
+    <input type="file" id="fileInput" />
+    <button onclick="sendMessage()">Send</button>
 
     <script>
-        const username = "User " + Math.floor(Math.random() * 1000);
-        const ws = new WebSocket("ws://localhost:9000");
-        const chatBox = document.getElementById("chat-box");
-        const input = document.getElementById("messageInput");
+        const socket = new WebSocket('ws://localhost:9000');
+        const messagesDiv = document.getElementById('messages');
 
-        ws.onopen = () => {
-            appendMessage(`<em>Connected as ${username}</em>`);
-        };
-
-        ws.onmessage = (e) => {
-            let data;
+        socket.onmessage = function (event) {
             try {
-                data = JSON.parse(e.data);
-            } catch {
-                data = { sender: '', message: e.data, image: null };
-            }
+                const data = JSON.parse(event.data);
+                const messageDiv = document.createElement('div');
+                messageDiv.classList.add('message');
 
-            let html = `<strong>${data.sender}:</strong><br>`;
-            if (data.image) {
-                html += `<img src="${data.image}" alt="Image" style="max-width: 200px; max-height: 200px;">`;
-            } else if (data.message) {
-                html += `${data.message}`;
-            }
+                let html = `<strong>${data.sender_id}</strong>:`;
 
-            appendMessage(html);
-        };
-
-        ws.onerror = (error) => {
-            console.error("WebSocket error:", error);
-        };
-
-        ws.onclose = () => {
-            appendMessage("<em>Disconnected from server.</em>");
-        };
-
-        async function uploadImage(file) {
-            const formData = new FormData();
-            formData.append('image', file);
-
-            const res = await fetch('upload.php', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await res.json();
-            if (data.url) return data.url;
-            else throw new Error(data.error || 'Upload failed');
-        }
-
-        document.getElementById('sendBtn').addEventListener('click', async () => {
-            const msg = input.value.trim();
-            const imageFile = document.getElementById('imageInput').files[0];
-
-            let imageUrl = null;
-            if (imageFile) {
-                try {
-                    imageUrl = await uploadImage(imageFile);
-                } catch (err) {
-                    alert('Image upload error: ' + err.message);
-                    return;
+                if (data.message && data.message.trim() !== '') {
+                    html += `<br>${data.message}`;
                 }
+
+                if (data.file_type === 'image') {
+                    html += `<br><img src="${data.file_url}" alt="Image">`;
+                } else if (data.file_type === 'pdf') {
+                    const filename = data.file_url.split('/').pop();
+                    html += `<br><a href="${data.file_url}" target="_blank" download>${filename}</a>`;
+                }
+
+                messageDiv.innerHTML = html;
+
+                // Append only if messagesDiv does not contain this node
+                if (!messagesDiv.contains(messageDiv)) {
+                    messagesDiv.appendChild(messageDiv);
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                }
+
+            } catch (err) {
+                console.error('Invalid JSON received:', event.data);
             }
+        };
 
-            const messageObj = {
-                sender: username,
-                message: msg || '',
-                image: imageUrl     
-            };
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const fileInput = document.getElementById('fileInput');
+            const text = input.value.trim();
+            const file = fileInput.files[0];
 
-            ws.send(JSON.stringify(messageObj));
+            if (file) {
+                const formData = new FormData();
+                formData.append('file', file);
 
-            input.value = '';
-            document.getElementById('imageInput').value = '';
-        });
+                fetch('upload.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.url) {
+                            socket.send(JSON.stringify({
+                                sender_id: 'User1',
+                                message: text,
+                                file_type: data.file_type,
+                                file_url: data.url
+                            }));
+                        } else {
+                            alert('Upload error: ' + data.error);
+                        }
+                    })
+                    .catch(() => alert('Upload failed'));
 
-        function appendMessage(msgHTML) {
-            const p = document.createElement("p");
-            p.innerHTML = msgHTML;
-            chatBox.appendChild(p);
-            chatBox.scrollTop = chatBox.scrollHeight;
+                fileInput.value = '';
+                input.value = '';
+            } else if (text !== '') {
+                socket.send(JSON.stringify({
+                    sender_id: 'User1',
+                    message: text,
+                    file_type: null,
+                    file_url: null
+                }));
+                input.value = '';
+            }
         }
-
-        input.addEventListener("keydown", e => {
-            if (e.key === "Enter") {
-                document.getElementById('sendBtn').click();
-            }
-        });
     </script>
 </body>
 
