@@ -50,6 +50,103 @@ class chat implements MessageComponentInterface
         echo "Received from {$from->resourceId}: $msg\n";
 
         $data = json_decode($msg, true);
+        if (!$data) {
+            return;
+        }
+        // Check if this is a text edit request
+        if (isset($data['type']) && $data['type'] === 'edit') {
+            $messageId = $data['message_id'] ?? null;
+            $newText = $data['new_text'] ?? null;
+
+            if ($messageId === null) {
+                $from->send(json_encode(['error' => 'Missing message_id for edit']));
+                return;
+            }
+            try {
+                // Update the existing message text in DB
+                $stmt = $this->pdo->prepare('UPDATE chat_messages SET message = ?, image_path = NULL, file_path = NULL WHERE id = ?');
+                $stmt->execute([$newText, $messageId]);
+            } catch (PDOException $e) {
+                echo 'DB Update Error: ' . $e->getMessage() . "\n";
+                $from->send(json_encode(["error" => "Error updating message"]));
+                return;
+            }
+            // Broadcast the edited message to all clients
+            foreach ($this->clients as $client) {
+                $payload = [
+                    'type' => 'edit',
+                    'message_id' => $messageId,
+                    'new_text' => $newText,
+                    'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}"
+                ];
+                $client->send(json_encode($payload));
+            }
+            return;
+        }
+
+        // Check if this is an image edit request
+        if (isset($data['type']) && $data['type'] === 'edit_image') {
+            $messageId = $data['message_id'] ?? null;
+            $newImageUrl = $data['new_image_url'] ?? null;
+
+            if ($messageId === null || $newImageUrl === null) {
+                $from->send(json_encode(['error' => 'Missing parameters for image edit']));
+                return;
+            }
+
+            try {
+                $stmt = $this->pdo->prepare("UPDATE chat_messages SET image_path = ?, file_path = NULL, message = NULL WHERE id = ?");
+                $stmt->execute([$newImageUrl, $messageId]);
+            } catch (PDOException $e) {
+                echo 'DB Image Update Error: ' . $e->getMessage() . "\n";
+                $from->send(json_encode(["error" => "Error updating image"]));
+                return;
+            }
+
+            foreach ($this->clients as $client) {
+                $payload = [
+                    'type' => 'edit_image',
+                    'message_id' => $messageId,
+                    'new_image_url' => $newImageUrl,
+                    'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}"
+                ];
+                $client->send(json_encode($payload));
+            }
+            return;
+        }
+
+        // Check if this is a PDF edit request (new addition)
+        if (isset($data['type']) && $data['type'] === 'edit_pdf') {
+            $messageId = $data['message_id'] ?? null;
+            $newPdfUrl = $data['new_pdf_url'] ?? null;
+
+            if ($messageId === null || $newPdfUrl === null) {
+                $from->send(json_encode(['error' => 'Missing parameters for PDF edit']));
+                return;
+            }
+
+            try {
+                $stmt = $this->pdo->prepare("UPDATE chat_messages SET file_path = ?, image_path = NULL, message = NULL WHERE id = ?");
+                $stmt->execute([$newPdfUrl, $messageId]);
+            } catch (PDOException $e) {
+                echo 'DB PDF Update Error: ' . $e->getMessage() . "\n";
+                $from->send(json_encode(["error" => "Error updating PDF"]));
+                return;
+            }
+
+            foreach ($this->clients as $client) {
+                $payload = [
+                    'type' => 'edit_pdf',
+                    'message_id' => $messageId,
+                    'new_pdf_url' => $newPdfUrl,
+                    'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}"
+                ];
+                $client->send(json_encode($payload));
+            }
+            return;
+        }
+
+        // Handle new message insert
         $messageText = $data["message"] ?? '';
         $fileType = $data['file_type'] ?? '';
         $fileUrl = $data['file_url'] ?? '';
@@ -66,14 +163,17 @@ class chat implements MessageComponentInterface
         try {
             $stmt = $this->pdo->prepare("INSERT INTO chat_messages (sender_id, message, image_path, file_path) VALUES (?, ?, ?, ?)");
             $stmt->execute([$from->resourceId, $messageText, $imagePath, $filePath]);
+            $lastInsertId = $this->pdo->lastInsertId();
         } catch (PDOException $e) {
             echo "DB Insert Error: " . $e->getMessage() . "\n";
             $from->send("Error saving message.");
             return;
         }
-
+        // Broadcast new message to all clients
         foreach ($this->clients as $client) {
             $payload = [
+                'type' => 'new',
+                'message_id' => $lastInsertId,
                 'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}",
                 'message' => $messageText,
                 'file_type' => $fileType,
