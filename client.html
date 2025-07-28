@@ -55,26 +55,78 @@
         socket.onmessage = function (event) {
             try {
                 const data = JSON.parse(event.data);
-                const messageDiv = document.createElement('div');
-                messageDiv.classList.add('message');
+
+                // Handle edited text message
+                if (data.type === 'edit') {
+                    const msgDiv = document.getElementById(`msg-${data.message_id}`);
+                    if (msgDiv) {
+                        const textSpan = msgDiv.querySelector('.message-text');
+                        if (textSpan) {
+                            textSpan.textContent = data.new_text;
+                        }
+                    }
+                    return;
+                }
+
+                // Handle edited image
+                if (data.type === 'edit_image') {
+                    const msgDiv = document.getElementById(`msg-${data.message_id}`);
+                    if (msgDiv) {
+                        const img = msgDiv.querySelector('img');
+                        if (img) {
+                            img.src = data.new_image_url;
+                        }
+                    }
+                    return;
+                }
+
+                // Handle edited PDF
+                if (data.type === 'edit_pdf') {
+                    const msgDiv = document.getElementById(`msg-${data.message_id}`);
+                    if (msgDiv) {
+                        const pdfLink = msgDiv.querySelector('a');
+                        if (pdfLink) {
+                            pdfLink.href = data.new_pdf_url;
+                            pdfLink.textContent = data.new_pdf_url.split('/').pop();
+                        }
+                    }
+                    return;
+                }
+
+                // For new messages
+                let messageDiv = document.getElementById(`msg-${data.message_id}`);
 
                 let html = `<strong>${data.sender_id}</strong>:`;
 
                 if (data.message && data.message.trim() !== '') {
-                    html += `<br>${data.message}`;
+                    html += `<br><span class="message-text">${data.message}</span>`;
                 }
 
                 if (data.file_type === 'image') {
-                    html += `<br><img src="${data.file_url}" alt="Image">`;
+                    html += `<br><img src="${data.file_url}" class="chat-image" alt="Image">`;
                 } else if (data.file_type === 'pdf') {
                     const filename = data.file_url.split('/').pop();
                     html += `<br><a href="${data.file_url}" target="_blank" download>${filename}</a>`;
                 }
 
-                messageDiv.innerHTML = html;
+                // Add edit buttons only for your messages
+                if (data.sender_id === 'You') {
+                    html += `<br><button class="edit-btn" data-id="${data.message_id}">Edit</button>`;
 
-                // Append only if messagesDiv does not contain this node
-                if (!messagesDiv.contains(messageDiv)) {
+                    if (data.file_type === 'image') {
+                        html += `<button class="edit-image-btn" data-id="${data.message_id}">Edit Image</button>`;
+                    } else if (data.file_type === 'pdf') {
+                        html += `<button class="edit-pdf-btn" data-id="${data.message_id}">Edit PDF</button>`;
+                    }
+                }
+
+                if (messageDiv) {
+                    messageDiv.innerHTML = html;
+                } else {
+                    messageDiv = document.createElement('div');
+                    messageDiv.classList.add('message');
+                    messageDiv.id = `msg-${data.message_id}`;
+                    messageDiv.innerHTML = html;
                     messagesDiv.appendChild(messageDiv);
                     messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 }
@@ -125,7 +177,103 @@
                 input.value = '';
             }
         }
+
+        // Handle click on text edit buttons (delegated)
+        document.addEventListener('click', function (e) {
+            if (e.target.classList.contains('edit-btn')) {
+                const msgId = e.target.getAttribute('data-id');
+                const currentText = document.querySelector(`#msg-${msgId} .message-text`).innerText;
+
+                const newText = prompt("Edit your message:", currentText);
+                if (newText !== null) {
+                    socket.send(JSON.stringify({
+                        type: 'edit',
+                        message_id: msgId,
+                        new_text: newText
+                    }));
+                }
+            }
+        });
+
+        // Handle click on image edit buttons (delegated)
+        document.addEventListener('click', function (event) {
+            if (event.target.classList.contains('edit-image-btn')) {
+                const messageId = event.target.getAttribute('data-id');
+
+                const newImageInput = document.createElement('input');
+                newImageInput.type = 'file';
+                newImageInput.accept = 'image/*';
+                newImageInput.onchange = async () => {
+                    const imageFile = newImageInput.files[0];
+                    if (!imageFile) return;
+
+                    const formData = new FormData();
+                    formData.append('file', imageFile); // Note: 'file' key for upload.php
+
+                    try {
+                        const uploadResponse = await fetch('upload.php', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        const result = await uploadResponse.json();
+                        if (result.url) {
+                            socket.send(JSON.stringify({
+                                type: 'edit_image',
+                                message_id: messageId,
+                                new_image_url: result.url
+                            }));
+                        } else {
+                            alert('Upload error: ' + result.error);
+                        }
+                    } catch {
+                        alert('Upload failed');
+                    }
+                };
+
+                newImageInput.click();
+            }
+        });
+
+        // Handle click on PDF edit buttons (delegated)
+        document.addEventListener('click', function (event) {
+            if (event.target.classList.contains('edit-pdf-btn')) {
+                const messageId = event.target.getAttribute('data-id');
+
+                const newPdfInput = document.createElement('input');
+                newPdfInput.type = 'file';
+                newPdfInput.accept = 'application/pdf';
+                newPdfInput.onchange = async () => {
+                    const pdfFile = newPdfInput.files[0];
+                    if (!pdfFile) return;
+
+                    const formData = new FormData();
+                    formData.append('file', pdfFile); // key 'file' again
+
+                    try {
+                        const uploadResponse = await fetch('upload.php', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        const result = await uploadResponse.json();
+                        if (result.url) {
+                            socket.send(JSON.stringify({
+                                type: 'edit_pdf',
+                                message_id: messageId,
+                                new_pdf_url: result.url
+                            }));
+                        } else {
+                            alert('Upload error: ' + result.error);
+                        }
+                    } catch {
+                        alert('Upload failed');
+                    }
+                };
+
+                newPdfInput.click();
+            }
+        });
     </script>
 </body>
-
 </html>
