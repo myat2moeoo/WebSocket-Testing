@@ -56,14 +56,20 @@
             try {
                 const data = JSON.parse(event.data);
 
-                // Handle edited text message
+                // Handle mark_read messages
+                if (data.type === 'mark_read') {
+                    const msgDiv = document.getElementById(`msg-${data.message_id}`);
+                    if (msgDiv) updateStatus(msgDiv, 'read');
+                    return;
+                }
+
+                // Handle edited text
                 if (data.type === 'edit') {
                     const msgDiv = document.getElementById(`msg-${data.message_id}`);
                     if (msgDiv) {
                         const textSpan = msgDiv.querySelector('.message-text');
-                        if (textSpan) {
-                            textSpan.textContent = data.new_text;
-                        }
+                        if (textSpan) textSpan.textContent = data.new_text;
+                        updateStatus(msgDiv, data.status);
                     }
                     return;
                 }
@@ -73,9 +79,8 @@
                     const msgDiv = document.getElementById(`msg-${data.message_id}`);
                     if (msgDiv) {
                         const img = msgDiv.querySelector('img');
-                        if (img) {
-                            img.src = data.new_image_url;
-                        }
+                        if (img) img.src = data.new_image_url;
+                        updateStatus(msgDiv, data.status);
                     }
                     return;
                 }
@@ -89,16 +94,21 @@
                             pdfLink.href = data.new_pdf_url;
                             pdfLink.textContent = data.new_pdf_url.split('/').pop();
                         }
+                        updateStatus(msgDiv, data.status);
                     }
                     return;
                 }
 
-                // For new messages
+                // Render new message
                 let messageDiv = document.getElementById(`msg-${data.message_id}`);
-
                 let html = `<strong>${data.sender_id}</strong>:`;
+                html += ` <span class="status-badge" style="font-size:0.8em; color:${data.status === 'unread' ? 'red' : 'green'}">[${data.status}]</span>`;
+                html += ':<br>';
 
-                if (data.message && data.message.trim() !== '') {
+                // Show "new message" only to receiver
+                if (data.sender_id !== 'You' && data.message && data.status === 'unread') {
+                    html += `<br><span class="message-text" style="font-style: italic; color: gray;" data-hidden-text="${encodeURIComponent(data.message)}">new message</span>`;
+                } else if (data.message && data.message.trim() !== '') {
                     html += `<br><span class="message-text">${data.message}</span>`;
                 }
 
@@ -109,10 +119,8 @@
                     html += `<br><a href="${data.file_url}" target="_blank" download>${filename}</a>`;
                 }
 
-                // Add edit buttons only for your messages
                 if (data.sender_id === 'You') {
                     html += `<br><button class="edit-btn" data-id="${data.message_id}">Edit</button>`;
-
                     if (data.file_type === 'image') {
                         html += `<button class="edit-image-btn" data-id="${data.message_id}">Edit Image</button>`;
                     } else if (data.file_type === 'pdf') {
@@ -128,6 +136,19 @@
                     messageDiv.id = `msg-${data.message_id}`;
                     messageDiv.innerHTML = html;
                     messagesDiv.appendChild(messageDiv);
+
+                    // Receiver click reveals message & marks as read
+                    if (data.sender_id !== 'You' && data.status === 'unread') {
+                        messageDiv.addEventListener('click', () => {
+                            const span = messageDiv.querySelector('.message-text');
+                            if (span && span.dataset.hiddenText) {
+                                span.textContent = decodeURIComponent(span.dataset.hiddenText);
+                                delete span.dataset.hiddenText;
+                                markMessagesAsRead(data.message_id);
+                            }
+                        });
+                    }
+
                     messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 }
 
@@ -208,7 +229,7 @@
                     if (!imageFile) return;
 
                     const formData = new FormData();
-                    formData.append('file', imageFile); // Note: 'file' key for upload.php
+                    formData.append('file', imageFile);
 
                     try {
                         const uploadResponse = await fetch('upload.php', {
@@ -248,7 +269,7 @@
                     if (!pdfFile) return;
 
                     const formData = new FormData();
-                    formData.append('file', pdfFile); // key 'file' again
+                    formData.append('file', pdfFile);
 
                     try {
                         const uploadResponse = await fetch('upload.php', {
@@ -274,6 +295,28 @@
                 newPdfInput.click();
             }
         });
+
+        function updateStatus(msgDiv, status) {
+            let badge = msgDiv.querySelector('.status-badge');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'status-badge';
+                badge.style.fontSize = '0.8em';
+                msgDiv.querySelector('strong').after(badge);
+            }
+            badge.textContent = `[${status}]`;
+            badge.style.color = (status === 'unread') ? 'red' : 'green';
+        }
+
+        function markMessagesAsRead(messageId) {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: "mark_read",
+                    message_id: messageId
+                }));
+            }
+        }
     </script>
 </body>
+
 </html>
