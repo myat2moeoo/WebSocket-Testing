@@ -53,6 +53,33 @@ class chat implements MessageComponentInterface
         if (!$data) {
             return;
         }
+
+        // Handle mark_read request
+        if (isset($data['type']) && $data['type'] === 'mark_read') {
+            $readerId = $from->resourceId;
+            try {
+                $stmt = $this->pdo->prepare("UPDATE chat_messages SET status = 'read' WHERE status = 'unread' AND sender_id != ?");
+                $stmt->execute([$readerId]);
+                $stmt = $this->pdo->query("SELECT id FROM chat_messages WHERE status = 'read' AND sender_id != $readerId");
+                $messageIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+                foreach ($this->clients as $client) {
+                    foreach ($messageIds as $msgId) {
+                        $client->send(json_encode([
+                            'type' => 'mark_read',
+                            'message_id' => $msgId,
+                            'status' => 'read'
+                        ]));
+                    }
+                }
+
+                echo "Marked messages as read for User {$readerId}\n";
+            } catch (PDOException $e) {
+                echo "Read status update error: " . $e->getMessage() . "\n";
+            }
+            return;
+        }
+
         // Check if this is a text edit request
         if (isset($data['type']) && $data['type'] === 'edit') {
             $messageId = $data['message_id'] ?? null;
@@ -66,6 +93,12 @@ class chat implements MessageComponentInterface
                 // Update the existing message text in DB
                 $stmt = $this->pdo->prepare('UPDATE chat_messages SET message = ?, image_path = NULL, file_path = NULL WHERE id = ?');
                 $stmt->execute([$newText, $messageId]);
+
+                // Get current status
+                $stmt = $this->pdo->prepare('SELECT status FROM chat_messages WHERE id = ?');
+                $stmt->execute([$messageId]);
+                $status = $stmt->fetchColumn() ?: 'unread';
+
             } catch (PDOException $e) {
                 echo 'DB Update Error: ' . $e->getMessage() . "\n";
                 $from->send(json_encode(["error" => "Error updating message"]));
@@ -77,7 +110,8 @@ class chat implements MessageComponentInterface
                     'type' => 'edit',
                     'message_id' => $messageId,
                     'new_text' => $newText,
-                    'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}"
+                    'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}",
+                    'status' => $status
                 ];
                 $client->send(json_encode($payload));
             }
@@ -97,6 +131,12 @@ class chat implements MessageComponentInterface
             try {
                 $stmt = $this->pdo->prepare("UPDATE chat_messages SET image_path = ?, file_path = NULL, message = NULL WHERE id = ?");
                 $stmt->execute([$newImageUrl, $messageId]);
+
+                // Get current status
+                $stmt = $this->pdo->prepare('SELECT status FROM chat_messages WHERE id = ?');
+                $stmt->execute([$messageId]);
+                $status = $stmt->fetchColumn() ?: 'unread';
+
             } catch (PDOException $e) {
                 echo 'DB Image Update Error: ' . $e->getMessage() . "\n";
                 $from->send(json_encode(["error" => "Error updating image"]));
@@ -108,7 +148,8 @@ class chat implements MessageComponentInterface
                     'type' => 'edit_image',
                     'message_id' => $messageId,
                     'new_image_url' => $newImageUrl,
-                    'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}"
+                    'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}",
+                    'status' => $status
                 ];
                 $client->send(json_encode($payload));
             }
@@ -128,6 +169,12 @@ class chat implements MessageComponentInterface
             try {
                 $stmt = $this->pdo->prepare("UPDATE chat_messages SET file_path = ?, image_path = NULL, message = NULL WHERE id = ?");
                 $stmt->execute([$newPdfUrl, $messageId]);
+
+                // Get current status
+                $stmt = $this->pdo->prepare('SELECT status FROM chat_messages WHERE id = ?');
+                $stmt->execute([$messageId]);
+                $status = $stmt->fetchColumn() ?: 'unread';
+
             } catch (PDOException $e) {
                 echo 'DB PDF Update Error: ' . $e->getMessage() . "\n";
                 $from->send(json_encode(["error" => "Error updating PDF"]));
@@ -139,7 +186,8 @@ class chat implements MessageComponentInterface
                     'type' => 'edit_pdf',
                     'message_id' => $messageId,
                     'new_pdf_url' => $newPdfUrl,
-                    'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}"
+                    'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}",
+                    'status' => $status
                 ];
                 $client->send(json_encode($payload));
             }
@@ -161,7 +209,7 @@ class chat implements MessageComponentInterface
         }
 
         try {
-            $stmt = $this->pdo->prepare("INSERT INTO chat_messages (sender_id, message, image_path, file_path) VALUES (?, ?, ?, ?)");
+            $stmt = $this->pdo->prepare("INSERT INTO chat_messages (sender_id, message, image_path, file_path, status) VALUES (?, ?, ?, ?, 'unread')");
             $stmt->execute([$from->resourceId, $messageText, $imagePath, $filePath]);
             $lastInsertId = $this->pdo->lastInsertId();
         } catch (PDOException $e) {
@@ -177,7 +225,8 @@ class chat implements MessageComponentInterface
                 'sender_id' => ($from === $client) ? 'You' : "User {$from->resourceId}",
                 'message' => $messageText,
                 'file_type' => $fileType,
-                'file_url' => $fileUrl
+                'file_url' => $fileUrl,
+                'status' => 'unread'
             ];
             $client->send(json_encode($payload));
         }
