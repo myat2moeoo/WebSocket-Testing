@@ -2,321 +2,179 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8" />
-    <title>WebSocket Chat with File Upload</title>
-    <style>
-        body {
-            font-family: Arial;
-            margin: 20px;
-        }
+  <meta charset="UTF-8" />
+  <title>WebSocket Chat</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
 
-        #messages {
-            border: 1px solid #ccc;
-            height: 300px;
-            overflow-y: scroll;
-            padding: 10px;
-            margin-bottom: 10px;
-        }
+    #messages {
+      border: 1px solid #ccc;
+      height: 300px;
+      overflow-y: scroll;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
 
-        .message {
-            margin-bottom: 15px;
-            padding: 5px;
-            border-bottom: 1px solid #eee;
-        }
+    #notification-box {
+      background-color: yellow;
+      padding: 10px;
+      margin-bottom: 10px;
+      display: none;
+      cursor: pointer;
+    }
 
-        .message img {
-            max-width: 200px;
-            display: block;
-            margin-top: 5px;
-        }
+    .file-link {
+      margin-top: 5px;
+      display: block;
+    }
 
-        .message a {
-            display: inline-block;
-            margin-top: 5px;
-            color: blue;
-            text-decoration: underline;
-        }
-    </style>
+    .message {
+      margin-bottom: 10px;
+    }
+
+    .message.read {
+      opacity: 0.6;
+    }
+  </style>
 </head>
 
 <body>
 
-    <h2>Chat App</h2>
-    <div id="messages"></div>
+  <h2>WebSocket Chat</h2>
 
-    <input type="text" id="messageInput" placeholder="Type a message" />
-    <input type="file" id="fileInput" />
-    <button onclick="sendMessage()">Send</button>
+  <div id="notification-box">New message received. Click to view.</div>
+  <div id="messages"></div>
 
-    <script>
-        const socket = new WebSocket('ws://localhost:9000');
-        const messagesDiv = document.getElementById('messages');
+  <input type="text" id="messageInput" placeholder="Enter your message">
+  <input type="file" id="fileInput">
+  <button onclick="sendMessage()">Send</button>
 
-        socket.onmessage = function (event) {
-            try {
-                const data = JSON.parse(event.data);
+  <script>
+    const ws = new WebSocket("ws://localhost:9000");
+    const messagesDiv = document.getElementById("messages");
+    const notificationBox = document.getElementById("notification-box");
 
-                // Handle mark_read messages
-                if (data.type === 'mark_read') {
-                    const msgDiv = document.getElementById(`msg-${data.message_id}`);
-                    if (msgDiv) updateStatus(msgDiv, 'read');
-                    return;
-                }
+    let latestUnread = null;
+    const localId = "Me";
 
-                // Handle edited text
-                if (data.type === 'edit') {
-                    const msgDiv = document.getElementById(`msg-${data.message_id}`);
-                    if (msgDiv) {
-                        const textSpan = msgDiv.querySelector('.message-text');
-                        if (textSpan) textSpan.textContent = data.new_text;
-                        updateStatus(msgDiv, data.status);
-                    }
-                    return;
-                }
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
 
-                // Handle edited image
-                if (data.type === 'edit_image') {
-                    const msgDiv = document.getElementById(`msg-${data.message_id}`);
-                    if (msgDiv) {
-                        const img = msgDiv.querySelector('img');
-                        if (img) img.src = data.new_image_url;
-                        updateStatus(msgDiv, data.status);
-                    }
-                    return;
-                }
+      if (data.type === "new" && data.sender_id === "You") {
+        displayMessage(data); // Show your own message
+      }
 
-                // Handle edited PDF
-                if (data.type === 'edit_pdf') {
-                    const msgDiv = document.getElementById(`msg-${data.message_id}`);
-                    if (msgDiv) {
-                        const pdfLink = msgDiv.querySelector('a');
-                        if (pdfLink) {
-                            pdfLink.href = data.new_pdf_url;
-                            pdfLink.textContent = data.new_pdf_url.split('/').pop();
-                        }
-                        updateStatus(msgDiv, data.status);
-                    }
-                    return;
-                }
+      if (data.type === "notification") {
+        latestUnread = data;
+        notificationBox.style.display = "block";
+      }
 
-                // Render new message
-                let messageDiv = document.getElementById(`msg-${data.message_id}`);
-                let html = `<strong>${data.sender_id}</strong>:`;
-                html += ` <span class="status-badge" style="font-size:0.8em; color:${data.status === 'unread' ? 'red' : 'green'}">[${data.status}]</span>`;
-                html += ':<br>';
-
-                // Show "new message" only to receiver
-                if (data.sender_id !== 'You' && data.message && data.status === 'unread') {
-                    html += `<br><span class="message-text" style="font-style: italic; color: gray;" data-hidden-text="${encodeURIComponent(data.message)}">new message</span>`;
-                } else if (data.message && data.message.trim() !== '') {
-                    html += `<br><span class="message-text">${data.message}</span>`;
-                }
-
-                if (data.file_type === 'image') {
-                    html += `<br><img src="${data.file_url}" class="chat-image" alt="Image">`;
-                } else if (data.file_type === 'pdf') {
-                    const filename = data.file_url.split('/').pop();
-                    html += `<br><a href="${data.file_url}" target="_blank" download>${filename}</a>`;
-                }
-
-                if (data.sender_id === 'You') {
-                    html += `<br><button class="edit-btn" data-id="${data.message_id}">Edit</button>`;
-                    if (data.file_type === 'image') {
-                        html += `<button class="edit-image-btn" data-id="${data.message_id}">Edit Image</button>`;
-                    } else if (data.file_type === 'pdf') {
-                        html += `<button class="edit-pdf-btn" data-id="${data.message_id}">Edit PDF</button>`;
-                    }
-                }
-
-                if (messageDiv) {
-                    messageDiv.innerHTML = html;
-                } else {
-                    messageDiv = document.createElement('div');
-                    messageDiv.classList.add('message');
-                    messageDiv.id = `msg-${data.message_id}`;
-                    messageDiv.innerHTML = html;
-                    messagesDiv.appendChild(messageDiv);
-
-                    // Receiver click reveals message & marks as read
-                    if (data.sender_id !== 'You' && data.status === 'unread') {
-                        messageDiv.addEventListener('click', () => {
-                            const span = messageDiv.querySelector('.message-text');
-                            if (span && span.dataset.hiddenText) {
-                                span.textContent = decodeURIComponent(span.dataset.hiddenText);
-                                delete span.dataset.hiddenText;
-                                markMessagesAsRead(data.message_id);
-                            }
-                        });
-                    }
-
-                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                }
-
-            } catch (err) {
-                console.error('Invalid JSON received:', event.data);
-            }
-        };
-
-        function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const fileInput = document.getElementById('fileInput');
-            const text = input.value.trim();
-            const file = fileInput.files[0];
-
-            if (file) {
-                const formData = new FormData();
-                formData.append('file', file);
-
-                fetch('upload.php', {
-                    method: 'POST',
-                    body: formData
-                })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.url) {
-                            socket.send(JSON.stringify({
-                                sender_id: 'User1',
-                                message: text,
-                                file_type: data.file_type,
-                                file_url: data.url
-                            }));
-                        } else {
-                            alert('Upload error: ' + data.error);
-                        }
-                    })
-                    .catch(() => alert('Upload failed'));
-
-                fileInput.value = '';
-                input.value = '';
-            } else if (text !== '') {
-                socket.send(JSON.stringify({
-                    sender_id: 'User1',
-                    message: text,
-                    file_type: null,
-                    file_url: null
-                }));
-                input.value = '';
-            }
+      if (data.type === "mark_read") {
+        const msgDiv = document.querySelector(`.message[data-id="${data.message_id}"]`);
+        if (msgDiv) {
+          msgDiv.classList.add("read");
+          const statusSpan = msgDiv.querySelector(".status");
+          if (statusSpan) {
+            statusSpan.textContent = "Read";
+          }
         }
+      }
+    };
 
-        // Handle click on text edit buttons (delegated)
-        document.addEventListener('click', function (e) {
-            if (e.target.classList.contains('edit-btn')) {
-                const msgId = e.target.getAttribute('data-id');
-                const currentText = document.querySelector(`#msg-${msgId} .message-text`).innerText;
-
-                const newText = prompt("Edit your message:", currentText);
-                if (newText !== null) {
-                    socket.send(JSON.stringify({
-                        type: 'edit',
-                        message_id: msgId,
-                        new_text: newText
-                    }));
-                }
-            }
+    notificationBox.onclick = () => {
+      if (latestUnread) {
+        displayMessage({
+          type: "new",
+          message_id: latestUnread.message_id,
+          sender_id: latestUnread.sender_id,
+          message: latestUnread.message,
+          file_type: latestUnread.file_type,
+          file_url: latestUnread.file_url,
+          status: "read"
         });
 
-        // Handle click on image edit buttons (delegated)
-        document.addEventListener('click', function (event) {
-            if (event.target.classList.contains('edit-image-btn')) {
-                const messageId = event.target.getAttribute('data-id');
+        ws.send(JSON.stringify({
+          type: "mark_read",
+          message_id: latestUnread.message_id
+        }));
 
-                const newImageInput = document.createElement('input');
-                newImageInput.type = 'file';
-                newImageInput.accept = 'image/*';
-                newImageInput.onchange = async () => {
-                    const imageFile = newImageInput.files[0];
-                    if (!imageFile) return;
+        latestUnread = null;
+        notificationBox.style.display = "none";
+      }
+    };
 
-                    const formData = new FormData();
-                    formData.append('file', imageFile);
+    function displayMessage(data) {
+      const div = document.createElement("div");
+      div.className = "message";
+      div.setAttribute("data-id", data.message_id);
+      div.innerHTML = `<strong>${data.sender_id}:</strong><br>`;
 
-                    try {
-                        const uploadResponse = await fetch('upload.php', {
-                            method: 'POST',
-                            body: formData
-                        });
+      if (data.file_type === "text") {
+        div.innerHTML += `${data.message}`;
+      } else if (data.file_type === "image") {
+        div.innerHTML += `<img src="${data.file_url}" alt="Image" style="max-width: 200px;">`;
+      } else if (data.file_type === "pdf") {
+        div.innerHTML += `<a href="${data.file_url}" target="_blank" class="file-link">📄 View PDF</a>`;
+      }
 
-                        const result = await uploadResponse.json();
-                        if (result.url) {
-                            socket.send(JSON.stringify({
-                                type: 'edit_image',
-                                message_id: messageId,
-                                new_image_url: result.url
-                            }));
-                        } else {
-                            alert('Upload error: ' + result.error);
-                        }
-                    } catch {
-                        alert('Upload failed');
-                    }
-                };
+      if (data.sender_id === "You") {
+        const status = data.status === "read" ? "Read" : "Unread";
+        div.innerHTML += `<br><span class="status">${status}</span>`;
+      }
 
-                newImageInput.click();
+      messagesDiv.appendChild(div);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function sendMessage() {
+      const messageInput = document.getElementById("messageInput");
+      const fileInput = document.getElementById("fileInput");
+      const text = messageInput.value.trim();
+      const file = fileInput.files[0];
+
+      if (!text && !file) {
+        alert("Please enter a message or select a file.");
+        return;
+      }
+
+      if (file) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        fetch("upload.php", {
+          method: "POST",
+          body: formData
+        })
+          .then(res => res.json())
+          .then(res => {
+            if (res.error) {
+              alert(res.error);
+            } else {
+              ws.send(JSON.stringify({
+                sender_id: localId,
+                message: text || file.name,
+                file_type: res.file_type,
+                file_url: res.url
+              }));
             }
-        });
+          });
+      } else {
+        ws.send(JSON.stringify({
+          sender_id: localId,
+          message: text,
+          file_type: "text",
+          file_url: ""
+        }));
+      }
 
-        // Handle click on PDF edit buttons (delegated)
-        document.addEventListener('click', function (event) {
-            if (event.target.classList.contains('edit-pdf-btn')) {
-                const messageId = event.target.getAttribute('data-id');
+      messageInput.value = "";
+      fileInput.value = "";
+    }
+  </script>
 
-                const newPdfInput = document.createElement('input');
-                newPdfInput.type = 'file';
-                newPdfInput.accept = 'application/pdf';
-                newPdfInput.onchange = async () => {
-                    const pdfFile = newPdfInput.files[0];
-                    if (!pdfFile) return;
-
-                    const formData = new FormData();
-                    formData.append('file', pdfFile);
-
-                    try {
-                        const uploadResponse = await fetch('upload.php', {
-                            method: 'POST',
-                            body: formData
-                        });
-
-                        const result = await uploadResponse.json();
-                        if (result.url) {
-                            socket.send(JSON.stringify({
-                                type: 'edit_pdf',
-                                message_id: messageId,
-                                new_pdf_url: result.url
-                            }));
-                        } else {
-                            alert('Upload error: ' + result.error);
-                        }
-                    } catch {
-                        alert('Upload failed');
-                    }
-                };
-
-                newPdfInput.click();
-            }
-        });
-
-        function updateStatus(msgDiv, status) {
-            let badge = msgDiv.querySelector('.status-badge');
-            if (!badge) {
-                badge = document.createElement('span');
-                badge.className = 'status-badge';
-                badge.style.fontSize = '0.8em';
-                msgDiv.querySelector('strong').after(badge);
-            }
-            badge.textContent = `[${status}]`;
-            badge.style.color = (status === 'unread') ? 'red' : 'green';
-        }
-
-        function markMessagesAsRead(messageId) {
-            if (socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({
-                    type: "mark_read",
-                    message_id: messageId
-                }));
-            }
-        }
-    </script>
 </body>
 
 </html>
